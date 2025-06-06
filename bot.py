@@ -5,13 +5,36 @@ from telegram import Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import database # Импортируем наш модуль для работы с БД
 
-# ТВОЙ ТОКЕН ТЕЛЕГРАМ БОТА
-TOKEN = "7782172857:AAGJY3aCID_EIBg6OPDPQiErIMEycMavhX4"
+# --- НОВОЕ: Импортируем dotenv ---
+from dotenv import load_dotenv
 
-# !!! ВАЖНО: УКАЖИ ЗДЕСЬ URL ТВОЕГО БЭКЕНДА/WEB APP !!!
-# Для локальной разработки используй localhost и порт, который будет использовать твой бэкенд (например, 8000)
-# В будущем, когда развернешь на Render.com, здесь будет URL от Render.
-WEB_APP_URL = "http://localhost:8000" # Пока так, потом это будет URL твоего развернутого Web App
+# --- НОВОЕ: Загружаем переменные окружения ---
+# Эта функция ищет файл .env в текущей директории и загружает переменные из него.
+# В продакшене (на сервере), если переменные окружения установлены системой,
+# load_dotenv() просто ничего не сделает, так как они уже будут доступны через os.getenv().
+load_dotenv()
+
+# --- НОВОЕ: Читаем токен и URL из переменных окружения ---
+# Получаем токен Telegram-бота из переменной окружения.
+# Если переменная не установлена, os.getenv() вернет None.
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Получаем URL Web App из переменной окружения.
+WEB_APP_URL = os.getenv("WEB_APP_URL")
+
+# --- НОВОЕ: Проверка на наличие токена и URL ---
+# Это критически важный шаг, чтобы бот не запустился без необходимых данных.
+if not TOKEN:
+    raise ValueError("Переменная окружения 'TELEGRAM_BOT_TOKEN' не найдена. "
+                     "Убедитесь, что она установлена или присутствует в файле .env")
+if not WEB_APP_URL:
+    raise ValueError("Переменная окружения 'WEB_APP_URL' не найдена. "
+                     "Убедитесь, что она установлена или присутствует в файле .env")
+
+# Для отладки: выводим загруженные значения (частично для безопасности токена)
+print(f"Загружен токен (первые 5 символов): {TOKEN[:5]}...")
+print(f"Загружен URL Web App: {WEB_APP_URL}")
+
 
 # Функция для обработки команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -25,6 +48,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Попытка создать или получить пользователя в БД
     try:
+        # Предполагаем, что database.create_user_if_not_exists возвращает ID пользователя из БД
         db_user_id = database.create_user_if_not_exists(user_id)
         print(f"Пользователь Telegram ID {user_id} (DB User ID: {db_user_id}) обработан.")
     except Exception as e:
@@ -32,9 +56,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Произошла ошибка при регистрации. Пожалуйста, попробуйте еще раз.")
         return
 
-    # Создаем кнопку Web App
+    # Создаем кнопки ReplyKeyboardMarkup
+    # Кнопка для открытия главного Web App
+    open_app_button = KeyboardButton("Начать знакомство!", web_app=WebAppInfo(url=WEB_APP_URL))
+    # Кнопки для навигации внутри Web App (примеры)
+    search_button = KeyboardButton("Поиск", web_app=WebAppInfo(url=WEB_APP_URL + "/search"))
+    messages_button = KeyboardButton("Сообщения", web_app=WebAppInfo(url=WEB_APP_URL + "/messages"))
+
     keyboard = [
-        [KeyboardButton("Начать знакомство!", web_app=WebAppInfo(url=WEB_APP_URL))]
+        [open_app_button], # Главная кнопка
+        [search_button, messages_button] # Дополнительные кнопки навигации
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
@@ -44,8 +75,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup # Прикрепляем нашу клавиатуру
     )
 
-    # Также устанавливаем меню для всего бота
-    await set_bot_menu_buttons(context.bot)
+    # --- Убрано set_bot_menu_buttons, так как ReplyKeyboardMarkup уже хорошо работает ---
+    # set_bot_menu_buttons использовался бы для set_commands,
+    # который показывает меню при клике на иконку "/".
+    # Для постоянных кнопок внизу экрана лучше использовать ReplyKeyboardMarkup.
+    # Если ты хочешь и меню-кнопки, и ReplyKeyboardMarkup, то нужно будет set_commands.
+    # Для начала, ReplyKeyboardMarkup более заметна и удобна.
 
 
 # Функция для обработки команды /help
@@ -54,6 +89,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         'Я бот для знакомств TOOT.\n'
         'Нажми на одну из кнопок в нижнем меню, чтобы перейти в приложение:\n'
+        '- "Начать знакомство" для основного приложения\n'
         '- "Поиск" для поиска новых знакомств\n'
         '- "Сообщения" для просмотра своих чатов.\n'
         'Или используй команду /start для начала.'
@@ -67,30 +103,17 @@ async def echo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'Нажми /start, чтобы начать, или /help для справки.'
     )
 
-# Функция для установки постоянных кнопок меню Telegram
-async def set_bot_menu_buttons(bot):
-    """Устанавливает постоянные кнопки меню в Telegram."""
-    menu_buttons = [
-        KeyboardButton("Поиск", web_app=WebAppInfo(url=WEB_APP_URL + "/search")), # Пример с путем
-        KeyboardButton("Сообщения", web_app=WebAppInfo(url=WEB_APP_URL + "/messages")) # Пример с путем
-    ]
-    # Web App URL для кнопок меню должен быть полным
-    await bot.set_chat_menu_button(
-        menu_button=None # Сбрасываем старую, если есть
-    )
-    # Используем set_chat_menu_button для создания кнопки "Меню" в поле ввода
-    # А для постоянных кнопок под полем ввода лучше использовать ReplyKeyboardMarkup
-    # В данном случае, ReplyKeyboardMarkup устанавливается в `start` и остается видимой.
-    # Если хотим, чтобы они были доступны через кнопку "Меню" (рядом с кнопкой камеры),
-    # то это другая функция: set_commands.
-
-    # Для показа кнопок под полем ввода (как в Тиндере)
-    # Мы уже это делаем в `start` и оно останется.
-    # Но для Menu Button, которая открывается по клику на иконку
-    # рядом с полем ввода сообщения, нужно использовать set_commands.
-    # Пока оставим то, что есть в start.
-    print("Кнопки меню для Web App должны быть установлены через ReplyKeyboardMarkup в start команде.")
-    print(f"URL для Web App: {WEB_APP_URL}")
+# --- Убрана неиспользуемая или потенциально запутывающая функция set_bot_menu_buttons ---
+# async def set_bot_menu_buttons(bot):
+#     """Устанавливает постоянные кнопки меню в Telegram (обычно для set_commands)."""
+#     # Если захотим использовать set_commands (меню по клику на /), то здесь будет список Command.
+#     # Например:
+#     # from telegram import BotCommand
+#     # await bot.set_my_commands([
+#     #     BotCommand("start", "Запустить бота"),
+#     #     BotCommand("help", "Показать помощь"),
+#     # ])
+#     print("Для постоянных кнопок под полем ввода используется ReplyKeyboardMarkup в start команде.")
 
 
 def main():
